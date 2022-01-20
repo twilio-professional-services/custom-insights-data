@@ -5,6 +5,7 @@ import { FlexPlugin } from 'flex-plugin';
 
 const PLUGIN_NAME = 'CustomInsightsDataPlugin';
 const HOLD_COUNT_PROP = 'conversation_measure_1';
+const MSG_COUNT_PROP = 'conversation_measure_2';
 
 //Global var to store queues object
 let queues = undefined;
@@ -43,7 +44,6 @@ export default class CustomInsightsDataPlugin extends FlexPlugin {
       delete newAttributes.conversations.followed_by;
       delete newAttributes.conversations.destination;
       delete newAttributes.conversations[HOLD_COUNT_PROP];
-
     }
     console.log(PLUGIN_NAME, 'Reset task attributes:', newAttributes);
     await task.setAttributes(newAttributes);
@@ -94,7 +94,7 @@ export default class CustomInsightsDataPlugin extends FlexPlugin {
       }
       await this.updateConversations(payload.task, { followed_by, destination });
     });
-    
+
     //Need to clear custom conversations attributes before next segment
     Actions.addListener('afterCompleteTask', async (payload) => {
       await this.resetConversations(payload.task);
@@ -105,7 +105,6 @@ export default class CustomInsightsDataPlugin extends FlexPlugin {
       //Increase hold count
       let holdCount = 0;
       const attr = payload.task.attributes;
-      let holdCountProp = 'conversation_measure_1';
       if (attr.hasOwnProperty('conversations')) {
         holdCount = attr.conversations[HOLD_COUNT_PROP] ? parseInt(attr.conversations[HOLD_COUNT_PROP]) : 0;
       }
@@ -114,6 +113,50 @@ export default class CustomInsightsDataPlugin extends FlexPlugin {
       console.log(PLUGIN_NAME, 'Updating hold count', newConvData);
       await this.updateConversations(payload.task, newConvData);
     });
+
+
+    //Chat metrics - WIP
+    // Looking for First Response time (duration) from Agent's first reply to customer
+    manager.workerClient.on("reservationCreated", reservation => {
+      if (reservation.task.taskChannelUniqueName !== 'voice') {
+        let channelSid = reservation.task.attributes.channelSid;
+        manager.chatClient.getChannelBySid(channelSid)
+          .then((channel) => {
+            channel.on('messageAdded', async (message) => {
+              const { author, body } = message;
+              let workerName = manager.workerClient.name;   //or use workerName = manager.user.identity;
+              let workerResponseTime;
+              console.log(PLUGIN_NAME, 'Channel', channelSid, 'created', channel.dateCreated, 'Message from', author, 'at', message.timestamp);
+              const attr = reservation.task.attributes;
+              //Message count
+              let msgCounts = {};
+              msgCounts[MSG_COUNT_PROP] = await channel.getMessagesCount();
+              console.log(PLUGIN_NAME, 'Updating msg counts', msgCounts);
+              await this.updateConversations(reservation.task, msgCounts);
+
+              //Agent First Response Time
+              if (author == workerName) {
+                workerResponseTime = (message.timestamp - channel.dateCreated) / 1000;
+                console.log(PLUGIN_NAME, 'Worker Response time since creation', workerResponseTime);
+                let firstResponseTime = 0;
+
+                if (attr.hasOwnProperty('conversations')) {
+                  firstResponseTime = attr.conversations.first_response_time ? attr.conversations.first_response_time : 0;
+                }
+                //Only reset 1st time
+                if (firstResponseTime == 0) {
+                  let newConvData = {};
+                  newConvData.first_response_time = workerResponseTime;
+                  console.log(PLUGIN_NAME, 'Updating first response time', newConvData);
+                  await this.updateConversations(reservation.task, newConvData);
+                }
+              };
+
+            });
+          });
+      }
+    });
+
 
   }
 

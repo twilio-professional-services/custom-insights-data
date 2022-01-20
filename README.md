@@ -6,13 +6,14 @@ Twilio Flex Plugins allow you to customize the appearance and behavior of [Twili
 ## How it works
 This Flex plugin captures several custom attributes for enhanced reporting capabilities in Flex Insights.
 
-For voice calls, this plugin populates these additional attributes to be able to report on the type of call transfers
 
-| Conversations Attribute | Description & Values |
-| -------- | ----------- |
-| followed_by | "Transfer to Queue" or "Transfer to Agent" (future: "External Transfer") |
-| destination | Queue Name (future: Agent Name or Phone Number for External Transfer) |
-| conversation_measure_1 | Hold Count per segment (reservation) |
+| Channel | Conversations Attribute | Description & Values |
+| ------  | -------- | ----------- |
+| Voice | followed_by | "Transfer to Queue" or "Transfer to Agent" (future: "External Transfer") |
+| Voice | destination | Transfer Queue Name (future: Agent Name or Phone Number for External Transfer) |
+| Voice | conversation_measure_1 | Hold Count per segment (reservation) |
+| Chat | first_response_time | Agent's First Message/Response Time |
+| Chat | conversation_measure_2 | Total Message Count in the Chat Channel |
 
 Note: This is the first version of this plugin. Additional attributes may be added as needed.
 
