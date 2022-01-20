@@ -94,11 +94,12 @@ export default class CustomInsightsDataPlugin extends FlexPlugin {
       }
       await this.updateConversations(payload.task, { followed_by, destination });
     });
-
+    
     //Need to clear custom conversations attributes before next segment
-    Actions.addListener('afterAcceptTask', async (payload) => {
+    Actions.addListener('afterCompleteTask', async (payload) => {
       await this.resetConversations(payload.task);
     });
+
 
     Actions.addListener('afterHoldCall', async (payload) => {
       //Increase hold count
@@ -106,15 +107,15 @@ export default class CustomInsightsDataPlugin extends FlexPlugin {
       const attr = payload.task.attributes;
       let holdCountProp = 'conversation_measure_1';
       if (attr.hasOwnProperty('conversations')) {
-         holdCount = attr.conversations[HOLD_COUNT_PROP] ? parseInt(attr.conversations[HOLD_COUNT_PROP]): 0;
+        holdCount = attr.conversations[HOLD_COUNT_PROP] ? parseInt(attr.conversations[HOLD_COUNT_PROP]) : 0;
       }
       let newConvData = {};
-      newConvData[HOLD_COUNT_PROP] = holdCount+1;
-      console.log(PLUGIN_NAME, 'Updating hold count', newConvData );
+      newConvData[HOLD_COUNT_PROP] = holdCount + 1;
+      console.log(PLUGIN_NAME, 'Updating hold count', newConvData);
       await this.updateConversations(payload.task, newConvData);
     });
 
- }
+  }
 
   /**
    * Registers the plugin reducers
