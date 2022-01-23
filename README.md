@@ -1,4 +1,4 @@
-# Custom Flex Insights Data Plugin v0.1 (WIP)
+# Custom Flex Insights Data Plugin v0.2 (WIP)
 
 ## Your custom Twilio Flex Plugin
 Twilio Flex Plugins allow you to customize the appearance and behavior of [Twilio Flex](https://www.twilio.com/flex). If you want to learn more about the capabilities and how to use the API, check out our [Flex documentation](https://www.twilio.com/docs/flex).
@@ -12,6 +12,8 @@ This Flex plugin captures several custom attributes for enhanced reporting capab
 | Voice | followed_by | "Transfer to Queue" or "Transfer to Agent" (future: "External Transfer") |
 | Voice | destination | Transfer Queue Name (future: Agent Name or Phone Number for External Transfer) |
 | Voice | conversation_measure_1 | Hold Count per segment (reservation) |
+| Voice | conversation_label_9 | Customer Call Sid |
+| Voice | conversation_label_10 | Conference Sid |
 | Chat | first_response_time | Agent's First Message/Response Time |
 | Chat | conversation_measure_2 | Total Message Count in the Chat Channel |
 
@@ -24,6 +26,10 @@ https://www.twilio.com/docs/flex/end-user-guide/insights/data-model
 and
 
 https://www.twilio.com/docs/flex/developer/insights/enhance-integration#add-custom-attributes-and-measures
+
+Note: Conversation Labels are associated with their respective Conversations Attributes. If you’re storing a high cardinality value in conversation_label_x, then don’t store anything in conversation_attribute_x. Flex Insights will put the unique segment ID in the matching conversation_attribute. This allows you to use the label to filter a report.
+
+https://www.twilio.com/docs/flex/developer/insights/labels#label-only-for-unique-values
 
 Sample Report
 

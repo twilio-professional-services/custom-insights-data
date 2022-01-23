@@ -1,4 +1,4 @@
-import { Actions, VERSION } from '@twilio/flex-ui';
+import { Actions, VERSION, Manager } from '@twilio/flex-ui';
 import { FlexPlugin } from 'flex-plugin';
 
 //import reducers, { namespace } from './states';
@@ -6,6 +6,9 @@ import { FlexPlugin } from 'flex-plugin';
 const PLUGIN_NAME = 'CustomInsightsDataPlugin';
 const HOLD_COUNT_PROP = 'conversation_measure_1';
 const MSG_COUNT_PROP = 'conversation_measure_2';
+
+const CALL_SID_LABEL_PROP = 'conversation_label_9';
+const CONFERENCE_SID_LABEL_PROP = 'conversation_label_10';
 
 //Global var to store queues object
 let queues = undefined;
@@ -49,7 +52,18 @@ export default class CustomInsightsDataPlugin extends FlexPlugin {
     await task.setAttributes(newAttributes);
   }
 
-
+  setCallConfSids = async (task) => {
+    //Store Customer Call Sid and Conference Sid in conversation_label_9 + 10
+    console.log(PLUGIN_NAME, 'setCallConfSids: ', task);
+    let callSid = task.attributes?.conference?.participants?.customer;
+    let confSid = task.attributes?.conference?.sid;
+    if (callSid && confSid) {
+      let newConvData = {};
+      newConvData[CALL_SID_LABEL_PROP] = callSid
+      newConvData[CONFERENCE_SID_LABEL_PROP] = confSid
+      await this.updateConversations(task, newConvData);
+    }
+  }
 
   getQueues = (manager) => new Promise(async (resolve) => {
     if (!queues) {
@@ -95,6 +109,12 @@ export default class CustomInsightsDataPlugin extends FlexPlugin {
       await this.updateConversations(payload.task, { followed_by, destination });
     });
 
+    //Optional: Auto Complete Task/Res for original agent initiating transfer
+    // Actions.addListener('afterTransferTask', (payload) => {
+    //   console.log(PLUGIN_NAME, 'afterTransferTaskPayload: ', payload);
+    //   Actions.invokeAction('CompleteTask', { sid: payload.sid });
+    // });
+
     //Need to clear custom conversations attributes before next segment
     Actions.addListener('afterCompleteTask', async (payload) => {
       await this.resetConversations(payload.task);
@@ -115,10 +135,14 @@ export default class CustomInsightsDataPlugin extends FlexPlugin {
     });
 
 
-    //Chat metrics - WIP
-    // Looking for First Response time (duration) from Agent's first reply to customer
     manager.workerClient.on("reservationCreated", reservation => {
-      if (reservation.task.taskChannelUniqueName !== 'voice') {
+      if (reservation.task.taskChannelUniqueName == 'voice') {
+        reservation.on("wrapup", async (reservation) => {
+          console.log(PLUGIN_NAME, 'Reservation wrapup', reservation);
+          await this.setCallConfSids(reservation.task);
+        });
+      } else {
+        //Chat metrics - First Response time (duration) from Agent's first reply to customer
         let channelSid = reservation.task.attributes.channelSid;
         manager.chatClient.getChannelBySid(channelSid)
           .then((channel) => {
@@ -137,9 +161,7 @@ export default class CustomInsightsDataPlugin extends FlexPlugin {
               //Agent First Response Time
               if (author == workerName) {
                 workerResponseTime = (message.timestamp - channel.dateCreated) / 1000;
-                console.log(PLUGIN_NAME, 'Worker Response time since creation', workerResponseTime);
                 let firstResponseTime = 0;
-
                 if (attr.hasOwnProperty('conversations')) {
                   firstResponseTime = attr.conversations.first_response_time ? attr.conversations.first_response_time : 0;
                 }
