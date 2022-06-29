@@ -1,17 +1,22 @@
-import { Actions, VERSION, Manager } from '@twilio/flex-ui';
-import { FlexPlugin } from 'flex-plugin';
-
+import { Actions, VERSION, Manager, TaskHelper } from '@twilio/flex-ui';
+import { FlexPlugin } from '@twilio/flex-plugin'
 //import reducers, { namespace } from './states';
 
 const PLUGIN_NAME = 'CustomInsightsDataPlugin';
 const HOLD_COUNT_PROP = 'conversation_measure_1';
 const MSG_COUNT_PROP = 'conversation_measure_2';
-
+const AGENT_MSG_COUNT_PROP = 'conversation_measure_3';
+const CUSTOMER_MSG_COUNT_PROP = 'conversation_measure_4';
 const CALL_SID_LABEL_PROP = 'conversation_label_9';
 const CONFERENCE_SID_LABEL_PROP = 'conversation_label_10';
 
+const CUSTOMER = 'Customer';
+const AGENT = 'Agent';
+const UNKNOWN = 'Unknown';
+
 //Global var to store queues object
 let queues = undefined;
+let _manager = Manager.getInstance();
 
 export default class CustomInsightsDataPlugin extends FlexPlugin {
   constructor() {
@@ -110,10 +115,19 @@ export default class CustomInsightsDataPlugin extends FlexPlugin {
     });
 
     //Optional: Auto Complete Task/Res for original agent initiating transfer
-    // Actions.addListener('afterTransferTask', (payload) => {
-    //   console.log(PLUGIN_NAME, 'afterTransferTaskPayload: ', payload);
-    //   Actions.invokeAction('CompleteTask', { sid: payload.sid });
-    // });
+    Actions.addListener('afterTransferTask', async (payload) => {
+      console.log(PLUGIN_NAME, 'afterTransferTaskPayload: ', payload);
+      let hang_up_by = UNKNOWN;
+      await this.updateConversations(payload.task, { hang_up_by });
+      //   Actions.invokeAction('CompleteTask', { sid: payload.sid });
+    });
+
+    Actions.addListener("afterHangupCall", async (payload) => {
+      console.log(PLUGIN_NAME, 'afterHangupCallPayload: ', payload);
+      let hang_up_by = AGENT;
+      await this.updateConversations(payload.task, { hang_up_by });
+    });
+
 
     //Need to clear custom conversations attributes before next segment
     Actions.addListener('afterCompleteTask', async (payload) => {
@@ -135,26 +149,36 @@ export default class CustomInsightsDataPlugin extends FlexPlugin {
     });
 
 
-    manager.workerClient.on("reservationCreated", reservation => {
+    manager.workerClient.on("reservationCreated", async reservation => {
       if (reservation.task.taskChannelUniqueName == 'voice') {
         reservation.on("wrapup", async (reservation) => {
           console.log(PLUGIN_NAME, 'Reservation wrapup', reservation);
           await this.setCallConfSids(reservation.task);
         });
+        //Set default value
+        this.updateConversations(reservation.task, { hang_up_by:CUSTOMER });
+
       } else {
         //Chat metrics - First Response time (duration) from Agent's first reply to customer
         let channelSid = reservation.task.attributes.channelSid;
         manager.chatClient.getChannelBySid(channelSid)
           .then((channel) => {
+            let agentMsgCount = 0;
+            let workerName = manager.workerClient.name;   //or use workerName = manager.user.identity;
             channel.on('messageAdded', async (message) => {
               const { author, body } = message;
-              let workerName = manager.workerClient.name;   //or use workerName = manager.user.identity;
+              //Note: Unable to catch initial messages from customer until agent accepts
+              if (author == workerName) agentMsgCount += 1;
+
               let workerResponseTime;
               console.log(PLUGIN_NAME, 'Channel', channelSid, 'created', channel.dateCreated, 'Message from', author, 'at', message.timestamp);
               const attr = reservation.task.attributes;
               //Message count
               let msgCounts = {};
-              msgCounts[MSG_COUNT_PROP] = await channel.getMessagesCount();
+              let totalMsgCount = await channel.getMessagesCount();
+              msgCounts[MSG_COUNT_PROP] = totalMsgCount
+              msgCounts[AGENT_MSG_COUNT_PROP] = agentMsgCount;
+              msgCounts[CUSTOMER_MSG_COUNT_PROP] = totalMsgCount - agentMsgCount;
               console.log(PLUGIN_NAME, 'Updating msg counts', msgCounts);
               await this.updateConversations(reservation.task, msgCounts);
 
@@ -175,11 +199,17 @@ export default class CustomInsightsDataPlugin extends FlexPlugin {
               };
 
             });
+            channel.on('memberLeft', async (member) => {
+              console.log(PLUGIN_NAME, member.identity, 'left the chat');
+              if (member.identity == workerName) {
+                await this.updateConversations(reservation.task, { hang_up_by:AGENT });
+              } else {
+                await this.updateConversations(reservation.task, { hang_up_by:CUSTOMER });
+              }
+            })
           });
       }
     });
-
-
   }
 
   /**

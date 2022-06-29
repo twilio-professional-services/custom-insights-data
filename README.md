@@ -1,4 +1,4 @@
-# Custom Flex Insights Data Plugin v0.2 (WIP)
+# Custom Flex Insights Data Plugin v0.3 (WIP)
 
 ## Your custom Twilio Flex Plugin
 Twilio Flex Plugins allow you to customize the appearance and behavior of [Twilio Flex](https://www.twilio.com/flex). If you want to learn more about the capabilities and how to use the API, check out our [Flex documentation](https://www.twilio.com/docs/flex).
@@ -16,6 +16,9 @@ This Flex plugin captures several custom attributes for enhanced reporting capab
 | Voice | conversation_label_10 | Conference Sid |
 | Chat | first_response_time | Agent's First Message/Response Time |
 | Chat | conversation_measure_2 | Total Message Count in the Chat Channel |
+| Chat | conversation_measure_3 | Agent Message Count in the Chat Channel |
+| Chat | conversation_measure_4 | Customer Message Count in the Chat Channel |
+| Chat+Voice | hang_up_by | "Agent" if agent hung-up the call or ended the Chat. "Customer" if customer ended the Chat |
 
 Note: This is the first version of this plugin. Additional attributes may be added as needed.
 
