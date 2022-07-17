@@ -156,19 +156,28 @@ export default class CustomInsightsDataPlugin extends FlexPlugin {
           await this.setCallConfSids(reservation.task);
         });
         //Set default value
-        this.updateConversations(reservation.task, { hang_up_by:CUSTOMER });
+        this.updateConversations(reservation.task, { hang_up_by: CUSTOMER });
 
       } else {
-        //Chat metrics - First Response time (duration) from Agent's first reply to customer
-        let channelSid = reservation.task.attributes.channelSid;
-        manager.chatClient.getChannelBySid(channelSid)
-          .then((channel) => {
+
+        reservation.on('accepted', async (reservation) => {
+          console.log(PLUGIN_NAME, 'Reservation Accepted: ', reservation);
+
+          // https://media.twiliocdn.com/sdk/js/chat/releases/3.2.4/docs/Client.html#event:channelAdded
+          // Fired when a Channel becomes visible to the Client. 
+          // Fired for created and not joined private channels and for all type of channels Client has joined or invited to.
+          manager.chatClient.on("channelAdded", async (channel) => {
+
+            console.log(PLUGIN_NAME, 'Channel Added.');
+            //Chat metrics - First Response time (duration) from Agent's first reply to customer
+            let channelSid = reservation.task.attributes.channelSid;
             let agentMsgCount = 0;
-            let workerName = manager.workerClient.name;   //or use workerName = manager.user.identity;
+            //let workerName = manager.workerClient.name;  //name has @ etc
+            const identity = manager.workerClient.attributes.contact_uri.replace('client:', '');
             channel.on('messageAdded', async (message) => {
               const { author, body } = message;
               //Note: Unable to catch initial messages from customer until agent accepts
-              if (author == workerName) agentMsgCount += 1;
+              if (author == identity) agentMsgCount += 1;
 
               let workerResponseTime;
               console.log(PLUGIN_NAME, 'Channel', channelSid, 'created', channel.dateCreated, 'Message from', author, 'at', message.timestamp);
@@ -183,7 +192,7 @@ export default class CustomInsightsDataPlugin extends FlexPlugin {
               await this.updateConversations(reservation.task, msgCounts);
 
               //Agent First Response Time
-              if (author == workerName) {
+              if (author == identity) {
                 workerResponseTime = (message.timestamp - channel.dateCreated) / 1000;
                 let firstResponseTime = 0;
                 if (attr.hasOwnProperty('conversations')) {
@@ -201,13 +210,15 @@ export default class CustomInsightsDataPlugin extends FlexPlugin {
             });
             channel.on('memberLeft', async (member) => {
               console.log(PLUGIN_NAME, member.identity, 'left the chat');
-              if (member.identity == workerName) {
-                await this.updateConversations(reservation.task, { hang_up_by:AGENT });
+              if (member.identity == identity) {
+                await this.updateConversations(reservation.task, { hang_up_by: AGENT });
               } else {
-                await this.updateConversations(reservation.task, { hang_up_by:CUSTOMER });
+                await this.updateConversations(reservation.task, { hang_up_by: CUSTOMER });
               }
-            })
+            });
+
           });
+        });
       }
     });
   }
