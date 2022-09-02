@@ -9,6 +9,8 @@ const AGENT_MSG_COUNT_PROP = 'conversation_measure_3';
 const CUSTOMER_MSG_COUNT_PROP = 'conversation_measure_4';
 const CALL_SID_LABEL_PROP = 'conversation_label_9';
 const CONFERENCE_SID_LABEL_PROP = 'conversation_label_10';
+const AVERAGE_RESPONSE_TIME = 'average_response_time';
+const FIRST_RESPONSE_TIME = 'first_response_time';
 
 const CUSTOMER = 'Customer';
 const AGENT = 'Agent';
@@ -45,30 +47,17 @@ export default class CustomInsightsDataPlugin extends FlexPlugin {
   }
 
   resetConversations = async (task) => {
+    //Transfers and Hold Count - only remove if there was a transfer
     let newAttributes = { ...task.attributes };
-    //Remove conversations property from object
-    if (newAttributes.hasOwnProperty('conversations')) {
-      console.log(PLUGIN_NAME, 'Removing custom conversations attributes');
+    if (newAttributes?.conversations?.followed_by) {
       delete newAttributes.conversations.followed_by;
       delete newAttributes.conversations.destination;
       delete newAttributes.conversations[HOLD_COUNT_PROP];
+      console.log(PLUGIN_NAME, 'Updating task with new attributes:', newAttributes);
+      await task.setAttributes(newAttributes);
     }
-    console.log(PLUGIN_NAME, 'Reset task attributes:', newAttributes);
-    await task.setAttributes(newAttributes);
   }
 
-  setCallConfSids = async (task) => {
-    //Store Customer Call Sid and Conference Sid in conversation_label_9 + 10
-    console.log(PLUGIN_NAME, 'setCallConfSids: ', task);
-    let callSid = task.attributes?.conference?.participants?.customer;
-    let confSid = task.attributes?.conference?.sid;
-    if (callSid && confSid) {
-      let newConvData = {};
-      newConvData[CALL_SID_LABEL_PROP] = callSid
-      newConvData[CONFERENCE_SID_LABEL_PROP] = confSid
-      await this.updateConversations(task, newConvData);
-    }
-  }
 
   getQueues = (manager) => new Promise(async (resolve) => {
     if (!queues) {
@@ -111,21 +100,14 @@ export default class CustomInsightsDataPlugin extends FlexPlugin {
       } else {
         followed_by = "Transfer to Agent";
       }
-      await this.updateConversations(payload.task, { followed_by, destination });
-    });
-
-    //Optional: Auto Complete Task/Res for original agent initiating transfer
-    Actions.addListener('afterTransferTask', async (payload) => {
-      console.log(PLUGIN_NAME, 'afterTransferTaskPayload: ', payload);
-      let hang_up_by = UNKNOWN;
-      await this.updateConversations(payload.task, { hang_up_by });
-      //   Actions.invokeAction('CompleteTask', { sid: payload.sid });
+      let convoData = { hang_up_by: UNKNOWN, followed_by, destination };
+      await this.updateConversations(payload.task, convoData);
     });
 
     Actions.addListener("afterHangupCall", async (payload) => {
       console.log(PLUGIN_NAME, 'afterHangupCallPayload: ', payload);
-      let hang_up_by = AGENT;
-      await this.updateConversations(payload.task, { hang_up_by });
+      let convoData = { hang_up_by: AGENT };
+      await this.updateConversations(payload.task, convoData);
     });
 
 
@@ -134,7 +116,7 @@ export default class CustomInsightsDataPlugin extends FlexPlugin {
       await this.resetConversations(payload.task);
     });
 
-
+    //Disable this if you you have no need to capture hold count
     Actions.addListener('afterHoldCall', async (payload) => {
       //Increase hold count
       let holdCount = 0;
@@ -150,16 +132,25 @@ export default class CustomInsightsDataPlugin extends FlexPlugin {
 
 
     manager.workerClient.on("reservationCreated", async reservation => {
+      //Reservation scope
       if (reservation.task.taskChannelUniqueName == 'voice') {
         reservation.on("wrapup", async (reservation) => {
           console.log(PLUGIN_NAME, 'Reservation wrapup', reservation);
-          await this.setCallConfSids(reservation.task);
+          let convoData = {};
+          //Check if hang_up_by is already set due to Agent invoking Hangup
+          let hu = reservation.task.attributes?.conversations?.hang_up_by;
+          if (!hu) convoData = { hang_up_by: CUSTOMER };
+          let callSid = reservation.task.attributes?.conference?.participants?.customer;
+          let confSid = reservation.task.attributes?.conference?.sid;
+          if (callSid && confSid) {
+            convoData[CALL_SID_LABEL_PROP] = callSid;
+            convoData[CONFERENCE_SID_LABEL_PROP] = confSid;
+          }
+          await this.updateConversations(reservation.task, convoData);
         });
-        //Set default value
-        this.updateConversations(reservation.task, { hang_up_by: CUSTOMER });
 
       } else {
-
+        //Chat
         reservation.on('accepted', async (reservation) => {
           console.log(PLUGIN_NAME, 'Reservation Accepted: ', reservation);
 
@@ -167,36 +158,9 @@ export default class CustomInsightsDataPlugin extends FlexPlugin {
           // Fired when a Channel becomes visible to the Client. 
           // Fired for created and not joined private channels and for all type of channels Client has joined or invited to.
           manager.chatClient.on("channelAdded", async (channel) => {
-
             console.log(PLUGIN_NAME, 'Channel Added.');
-            //Chat metrics - First Response time (duration) from Agent's first reply to customer
-            let channelSid = reservation.task.attributes.channelSid;
             //let workerName = manager.workerClient.name;  //name has @ etc
             const identity = manager.workerClient.attributes.contact_uri.replace('client:', '');
-            channel.on('messageAdded', async (message) => {
-              const { author, body } = message;
-
-              let workerResponseTime;
-              console.log(PLUGIN_NAME, 'Channel', channelSid, 'created', channel.dateCreated, 'Message from', author, 'at', message.timestamp);
-              const attr = reservation.task.attributes;
-
-              //Agent First Response Time
-              if (author == identity) {
-                workerResponseTime = (message.timestamp - channel.dateCreated) / 1000;
-                let firstResponseTime = 0;
-                if (attr.hasOwnProperty('conversations')) {
-                  firstResponseTime = attr.conversations.first_response_time ? attr.conversations.first_response_time : 0;
-                }
-                //Only reset 1st time
-                if (firstResponseTime == 0) {
-                  let newConvData = {};
-                  newConvData.first_response_time = workerResponseTime;
-                  console.log(PLUGIN_NAME, 'Updating first response time', newConvData);
-                  await this.updateConversations(reservation.task, newConvData);
-                }
-              };
-
-            });
             channel.on('memberLeft', async (member) => {
               console.log(PLUGIN_NAME, member.identity, 'left the chat');
               if (member.identity == identity) {
@@ -220,21 +184,40 @@ export default class CustomInsightsDataPlugin extends FlexPlugin {
           const chatChannel = flexChatChannels[channelSid];
           const messages = chatChannel?.messages || [];
           console.log(PLUGIN_NAME, 'Channel Messages', messages);
-          messages.forEach(m => {
-            if (m.isFromMe == true) agentMsgCount++;
-          });
+
+          let durations = [];
+          let firstResponseTime = 0;
+          for (let i = 0; i < messages.length; i++) {
+            if (messages[i].isFromMe === true) {
+              if (firstResponseTime == 0) {
+                firstResponseTime = (messages[i]?.source.state.timestamp - messages[0]?.source.state.timestamp) / 1000;
+              }
+              agentMsgCount++;
+            }
+            if (i > 0) {
+              if (messages[i].isFromMe === true && messages[i - 1].isFromMe !== true) {
+                durations.push((new Date(messages[i]?.source.state.timestamp) - new Date(messages[i - 1]?.source.state.timestamp)) / 1000)
+              }
+            }
+          }
+          // exclude first agent response
+          durations.shift()
+          const averageResponseTime = (durations.length > 0) ? durations.reduce((a, b) => a + b, 0) / durations.length : null;
 
           let msgCounts = {};
           let totalMsgCount = messages.length;
           msgCounts[MSG_COUNT_PROP] = totalMsgCount;
           msgCounts[AGENT_MSG_COUNT_PROP] = agentMsgCount;
           msgCounts[CUSTOMER_MSG_COUNT_PROP] = totalMsgCount - agentMsgCount;
+          msgCounts[FIRST_RESPONSE_TIME] = firstResponseTime
+          msgCounts[AVERAGE_RESPONSE_TIME] = averageResponseTime;
           console.log(PLUGIN_NAME, 'Updating msg counts', msgCounts);
           await this.updateConversations(reservation.task, msgCounts);
         });
       }
     });
   }
+
   /**
    * Registers the plugin reducers
    *
